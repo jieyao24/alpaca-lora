@@ -54,17 +54,66 @@ alpaca-lora/
 
 > Note: On Hyak I keep a workspace directory (e.g. `alpaca-lora-run/`) that contains this repo plus runtime folders like `out/` and `logs/`. Only the repo itself is pushed to GitHub.
 
-## 3. Training Monitoring
+## 3. Training Configuration and Monitoring
+
+### Compute (Hyak)
+- Cluster: UW Hyak
+- GPU: 1 × NVIDIA L40 (`--partition=gpu-l40`, `--gres=gpu:1`)
+- CPU: 4 (`--cpus-per-task=4`)
+- Memory: 48G (`--mem=48G`)
+- Time limit: 8h (`--time=08:00:00`) (In fact around two hours)
+
+### Base Model & Dataset
+- Base model: `openlm-research/open_llama_7b_v2`
+- Dataset: `yahma/alpaca-cleaned`
+- Validation set size: `200`
+- Context length (cutoff): `256`
+
+### Optimization & Batch
+- Epochs: `1`
+- Learning rate: `3e-4`
+- Micro batch size: `4`
+- Global batch size: `32`
+- `group_by_length`: enabled (more efficient batching)
+
+### LoRA Hyperparameters
+- LoRA rank (r): `8`
+- LoRA alpha: `16`
+- LoRA dropout: `0.05`
+
+### Logging
+- Weights & Biases:
+  - project: `instr-alpaca-lora-7b`
+  - run name: `instr-alpaca-lora-7b_<SLURM_JOB_ID>`
+
+### Cluster-specific Notes (Hyak)
+- Hugging Face caches were redirected to scratch to avoid filling home quota:
+  - `HF_HOME=/gscratch/.../.cache/huggingface`
+  - `TRANSFORMERS_CACHE`, `HF_DATASETS_CACHE`
+- W&B cache directory:
+  - `WANDB_DIR=/gscratch/.../.cache/wandb`
+- CUDA allocator tweak to reduce fragmentation:
+  - `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`
+
+Please refer to my [sbacth file](!./instr_tuning_alpaca_lora_7b.sbatch) to see more details.
 
 Please refer to  [WanDB](!https://wandb.ai/yan-sir/instr-alpaca-lora-7b?nw=nwuserjieyao99) to see my latest training process.
 
+Please refer to [my lora adapter page](!https://huggingface.co/JieYao24/alpaca-lora-openllama-7b-hyak) for the information of my training result. The latest training day is Feb 9, 2026.
+
 ## 4. Deployment
 
-Using this to deploy:
-
+Using this to deploy:  
 python generate.py \
   --base_model openlm-research/open_llama_7b \
   --lora_weights path/to/checkpoint
+
+If you want to use my lora adapter weights:  
+python generate.py \
+  --base_model openlm-research/open_llama_7b_v2 \
+  --lora_weights jieyao24/alpaca-lora-openllama-7b-hyak
+
+The latest training day is Feb 9, 2026.
 
 ## 5. Inference Configuration
 
