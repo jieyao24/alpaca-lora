@@ -17,12 +17,17 @@ from peft import (
     LoraConfig,
     get_peft_model,
     get_peft_model_state_dict,
-    prepare_model_for_int8_training,
+    prepare_model_for_kbit_training,
     set_peft_model_state_dict,
 )
-from transformers import LlamaForCausalLM, LlamaTokenizer
+from transformers import AutoModelForCausalLM, BitsAndBytesConfig, AutoTokenizer
 
 from utils.prompter import Prompter
+
+
+bnb_config = BitsAndBytesConfig(
+    load_in_8bit=True,
+)
 
 
 def train(
@@ -109,14 +114,16 @@ def train(
     if len(wandb_log_model) > 0:
         os.environ["WANDB_LOG_MODEL"] = wandb_log_model
 
-    model = LlamaForCausalLM.from_pretrained(
+    model = AutoModelForCausalLM.from_pretrained(
         base_model,
-        load_in_8bit=True,
-        torch_dtype=torch.float16,
+        #quantization_config=bnb_config,
+        revision="refs/pr/6",
+        torch_dtype=torch.bfloat16,
         device_map=device_map,
+        use_safetensors=True,
     )
 
-    tokenizer = LlamaTokenizer.from_pretrained(base_model)
+    tokenizer = AutoTokenizer.from_pretrained(base_model, use_fast=False)
 
     tokenizer.pad_token_id = (
         0  # unk. we want this to be different from the eos token
@@ -171,7 +178,7 @@ def train(
             ]  # could be sped up, probably
         return tokenized_full_prompt
 
-    model = prepare_model_for_int8_training(model)
+    #model = prepare_model_for_kbit_training(model)
 
     config = LoraConfig(
         r=lora_r,
@@ -239,7 +246,8 @@ def train(
             warmup_steps=100,
             num_train_epochs=num_epochs,
             learning_rate=learning_rate,
-            fp16=True,
+            fp16=False,
+            bf16=True,
             logging_steps=10,
             optim="adamw_torch",
             evaluation_strategy="steps" if val_set_size > 0 else "no",
@@ -253,24 +261,37 @@ def train(
             group_by_length=group_by_length,
             report_to="wandb" if use_wandb else None,
             run_name=wandb_run_name if use_wandb else None,
+            save_safetensors=False,
         ),
         data_collator=transformers.DataCollatorForSeq2Seq(
             tokenizer, pad_to_multiple_of=8, return_tensors="pt", padding=True
         ),
     )
     model.config.use_cache = False
-
+    '''
     old_state_dict = model.state_dict
     model.state_dict = (
         lambda self, *_, **__: get_peft_model_state_dict(
             self, old_state_dict()
         )
     ).__get__(model, type(model))
-
+    '''
     if torch.__version__ >= "2" and sys.platform != "win32":
         model = torch.compile(model)
 
     trainer.train(resume_from_checkpoint=resume_from_checkpoint)
+
+    print("\n" + "="*60)
+    print("Manual backup save...")
+    print("="*60)
+
+    lora_state_dict = get_peft_model_state_dict(model)
+    manual_path = os.path.join(output_dir, "adapter_model_manual.bin")
+    torch.save(lora_state_dict, manual_path)
+
+    size_mb = os.path.getsize(manual_path) / 1024 / 1024
+    print(f"✅ Saved: {manual_path} ({size_mb:.2f} MB)")
+    print("="*60 + "\n")
 
     model.save_pretrained(output_dir)
 

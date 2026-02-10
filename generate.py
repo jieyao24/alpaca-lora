@@ -22,7 +22,6 @@ try:
 except:  # noqa: E722
     pass
 
-
 def main(
     load_8bit: bool = False,
     base_model: str = "",
@@ -30,6 +29,7 @@ def main(
     prompt_template: str = "",  # The prompt template to use, will default to alpaca.
     server_name: str = "0.0.0.0",  # Allows to listen on all interfaces by providing '0.
     share_gradio: bool = False,
+    base_model_revision: str = "refs/pr/6",
 ):
     base_model = base_model or os.environ.get("BASE_MODEL", "")
     assert (
@@ -37,13 +37,18 @@ def main(
     ), "Please specify a --base_model, e.g. --base_model='huggyllama/llama-7b'"
 
     prompter = Prompter(prompt_template)
-    tokenizer = LlamaTokenizer.from_pretrained(base_model)
+    tokenizer = LlamaTokenizer.from_pretrained(
+    base_model,
+    revision=base_model_revision,
+)
     if device == "cuda":
         model = LlamaForCausalLM.from_pretrained(
             base_model,
-            load_in_8bit=load_8bit,
+            #load_in_8bit=load_8bit,
             torch_dtype=torch.float16,
             device_map="auto",
+            use_safetensors=True,
+            revision=base_model_revision,
         )
         model = PeftModel.from_pretrained(
             model,
@@ -71,6 +76,29 @@ def main(
             lora_weights,
             device_map={"": device},
         )
+    
+    print("Model class:", type(model))
+    assert isinstance(model, PeftModel), "Not a PeftModel -> LoRA not loaded"
+
+    print("Active adapter:", getattr(model, "active_adapter", None))
+    print("Adapters:", getattr(model, "peft_config", {}).keys())
+
+    lora_tensors = []
+    for n, p in model.named_parameters():
+        if "lora_" in n.lower():
+            lora_tensors.append((n, p))
+
+    print("LoRA param tensors:", len(lora_tensors))
+    assert len(lora_tensors) > 0, "LoRA injected 0 params -> target_modules mismatch (or wrong model arch)"
+
+    # 看看是不是全 0
+    nonzero = []
+    for n, p in lora_tensors[:50]:  # 前50个够了
+        val = torch.norm(p.detach().float()).item()
+        nonzero.append(val)
+
+    print("LoRA norms (first 50):", nonzero[:10])
+    print("LoRA norms min/max:", min(nonzero), max(nonzero))
 
     # unwind broken decapoda-research config
     model.config.pad_token_id = tokenizer.pad_token_id = 0  # unk
@@ -142,7 +170,7 @@ def main(
                     if output[-1] in [tokenizer.eos_token_id]:
                         break
 
-                    yield prompter.get_response(decoded_output)
+                    return prompter.get_response(decoded_output)
             return  # early return for stream_output
 
         # Without streaming
@@ -156,7 +184,7 @@ def main(
             )
         s = generation_output.sequences[0]
         output = tokenizer.decode(s)
-        yield prompter.get_response(output)
+        return prompter.get_response(output)
 
     gr.Interface(
         fn=evaluate,
@@ -184,12 +212,7 @@ def main(
             ),
             gr.components.Checkbox(label="Stream output"),
         ],
-        outputs=[
-            gr.inputs.Textbox(
-                lines=5,
-                label="Output",
-            )
-        ],
+        outputs= [gr.Textbox(lines=5, label="Output")],
         title="🦙🌲 Alpaca-LoRA",
         description="Alpaca-LoRA is a 7B-parameter LLaMA model finetuned to follow instructions. It is trained on the [Stanford Alpaca](https://github.com/tatsu-lab/stanford_alpaca) dataset and makes use of the Huggingface LLaMA implementation. For more information, please visit [the project's website](https://github.com/tloen/alpaca-lora).",  # noqa: E501
     ).queue().launch(server_name="0.0.0.0", share=share_gradio)
