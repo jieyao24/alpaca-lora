@@ -65,7 +65,7 @@ alpaca-lora/
 
 ### Base Model & Dataset
 - Base model: `openlm-research/open_llama_7b_v2`
-- Dataset: `yahma/alpaca-cleaned` [(Analysis of the dataset)](!https://colab.research.google.com/drive/1fqL02jas9u25YozgMpZbd3_pI4xyFGCd?usp=sharing)
+- Dataset: `yahma/alpaca-cleaned` [(Analysis of the dataset)](https://colab.research.google.com/drive/1fqL02jas9u25YozgMpZbd3_pI4xyFGCd?usp=sharing)
 - Validation set size: `200`
 - Context length (cutoff): `256`
 
